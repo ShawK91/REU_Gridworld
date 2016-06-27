@@ -3,7 +3,7 @@ from random import randint
 import random, sys
 import numpy as np
 import mod_rqe as mod
-import keras
+import keras, math
 
 # MACROS
 # Gridworld Dimensions
@@ -14,6 +14,7 @@ hidden_nodes = 35
 epsilon = 0.5  # Exploration Policy
 alpha = 0.5  # Learning rate
 gamma = 0.7 # Discount rate
+temperature = 3
 total_steps = 250 #Total roaming steps without goal before termination
 num_agents = 1
 num_poi = 1
@@ -29,6 +30,8 @@ success_replay  = True
 neat_growth = 2
 use_prune = True #Prune duplicates
 angled_repr = True
+use_softmax = True
+
 
 
 def test_random(gridworld,  illustrate = False):
@@ -114,12 +117,27 @@ def get_qvalues(nn_state, q_model):
         values[i] = q_model[i].predict(nn_state)
     return values
 
-def decay(epsilon, alpha):
+def decay(epsilon, alpha, temperature):
     if epsilon > 0.0:
         epsilon -= 0.00005
     if alpha > 0.1:
         alpha -= 0.00005
-    return epsilon, alpha
+    if temperature > 0.2:
+	temperature -= 0.003
+    return epsilon, alpha, temperature
+
+def softmax_policy(q_vals, temperature):
+    probs = np.copy(q_vals[0])
+  
+    for i in range(len(q_vals)):
+        probs[i] = math.exp(q_vals[0][i]/temperature)
+    probs = probs/np.sum(probs) #Normalize
+    rand = random.random()
+    counter = 0
+    for i in range(len(probs)):
+        counter += probs[i]
+        if rand < counter:
+            return i
 
 def reset_trajectories():
     trajectory_states = []
@@ -173,7 +191,7 @@ if __name__ == "__main__":
 
     for train_epoch in range(total_train_epoch): #Training Epochs Main Loop
         if train_epoch == 0: continue
-        epsilon, alpha = decay(epsilon, alpha)
+        epsilon, alpha, temperature = decay(epsilon, alpha, temperature)
         nn_state, steps, tot_reward = reset_board() #Reset board
 
         for steps in range(total_steps): #One training episode till goal is not reached
@@ -182,12 +200,17 @@ if __name__ == "__main__":
                 prev_table_pos = np.array(table_pos).copy()  # Backup current state as previous state
 
                 q_vals = (q_table[table_pos[0]][[table_pos[1]]])
-                action = np.argmax(q_vals[0])
-                if np.amax(q_vals[0]) - np.amin(q_vals[0]) == 0:  # Random if all choices are same
-                    action = randint(0, 4)
+		if use_softmax:
+			action = softmax_policy(q_vals, temperature) #Softmax decay
+		else:
+		        action = np.argmax(q_vals[0])
+		        if np.amax(q_vals[0]) - np.amin(q_vals[0]) == 0:  # Random if all choices are same
+		            action = randint(0, 4)
 
-                if random.random() < epsilon and steps % 7 != 0: #Random action epsilon greedy step + data sampling
-                    action = randint(0,4)
+		        if random.random() < epsilon and steps % 7 != 0: #Random action epsilon greedy step + data sampling
+		            action = randint(0,4)
+
+		 
 
                 #Get Reward and move
                 reward, _ = gridworld.move_and_get_reward(agent_id, action)
